@@ -1,6 +1,7 @@
 __author__    = 'Tim Tomes (@lanmaster53)'
 
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import urljoin
 import errno
 import imp
@@ -18,7 +19,7 @@ from recon.core import framework
 from recon.core.constants import BANNER, BANNER_SMALL
 
 # set the __version__ variable based on the VERSION file
-exec(open(os.path.join(sys.path[0], 'VERSION')).read())
+exec(open(os.path.join(Path(os.path.abspath(__file__)).parents[2], 'VERSION')).read())
 
 # using stdout to spool causes tab complete issues
 # therefore, override print function
@@ -31,7 +32,8 @@ def spool_print(*args, **kwargs):
         if framework.Framework._spool:
             framework.Framework._spool.write(f"{args[0]}{os.linesep}")
             framework.Framework._spool.flush()
-        if 'console' in kwargs and kwargs['console'] is False:
+        # disable terminal output for server jobs
+        if framework.Framework._mode == Mode.JOB:
             return
         # new print function must still use the old print function via the backup
         builtins._print(*args, **kwargs)
@@ -68,7 +70,7 @@ class Recon(framework.Framework):
 
     def start(self, mode, workspace='default'):
         # initialize framework components
-        self._mode = mode
+        self._mode = framework.Framework._mode = mode
         self._init_global_options()
         self._init_home()
         self._init_workspace(workspace)
@@ -232,24 +234,25 @@ class Recon(framework.Framework):
         return snapshots
 
     def _create_db(self):
-        self.query('CREATE TABLE IF NOT EXISTS domains (domain TEXT, module TEXT)')
-        self.query('CREATE TABLE IF NOT EXISTS companies (company TEXT, description TEXT, module TEXT)')
-        self.query('CREATE TABLE IF NOT EXISTS netblocks (netblock TEXT, module TEXT)')
-        self.query('CREATE TABLE IF NOT EXISTS locations (latitude TEXT, longitude TEXT, street_address TEXT, module TEXT)')
-        self.query('CREATE TABLE IF NOT EXISTS vulnerabilities (host TEXT, reference TEXT, example TEXT, publish_date TEXT, category TEXT, status TEXT, module TEXT)')
-        self.query('CREATE TABLE IF NOT EXISTS ports (ip_address TEXT, host TEXT, port TEXT, protocol TEXT, module TEXT)')
-        self.query('CREATE TABLE IF NOT EXISTS hosts (host TEXT, ip_address TEXT, region TEXT, country TEXT, latitude TEXT, longitude TEXT, module TEXT)')
-        self.query('CREATE TABLE IF NOT EXISTS contacts (first_name TEXT, middle_name TEXT, last_name TEXT, email TEXT, title TEXT, region TEXT, country TEXT, module TEXT)')
-        self.query('CREATE TABLE IF NOT EXISTS credentials (username TEXT, password TEXT, hash TEXT, type TEXT, leak TEXT, module TEXT)')
-        self.query('CREATE TABLE IF NOT EXISTS leaks (leak_id TEXT, description TEXT, source_refs TEXT, leak_type TEXT, title TEXT, import_date TEXT, leak_date TEXT, attackers TEXT, num_entries TEXT, score TEXT, num_domains_affected TEXT, attack_method TEXT, target_industries TEXT, password_hash TEXT, password_type TEXT, targets TEXT, media_refs TEXT, module TEXT)')
-        self.query('CREATE TABLE IF NOT EXISTS pushpins (source TEXT, screen_name TEXT, profile_name TEXT, profile_url TEXT, media_url TEXT, thumb_url TEXT, message TEXT, latitude TEXT, longitude TEXT, time TEXT, module TEXT)')
+        self.query('CREATE TABLE IF NOT EXISTS domains (domain TEXT, notes TEXT, module TEXT)')
+        self.query('CREATE TABLE IF NOT EXISTS companies (company TEXT, description TEXT, notes TEXT, module TEXT)')
+        self.query('CREATE TABLE IF NOT EXISTS netblocks (netblock TEXT, notes TEXT, module TEXT)')
+        self.query('CREATE TABLE IF NOT EXISTS locations (latitude TEXT, longitude TEXT, street_address TEXT, notes TEXT, module TEXT)')
+        self.query('CREATE TABLE IF NOT EXISTS vulnerabilities (host TEXT, reference TEXT, example TEXT, publish_date TEXT, category TEXT, status TEXT, notes TEXT, module TEXT)')
+        self.query('CREATE TABLE IF NOT EXISTS ports (ip_address TEXT, host TEXT, port TEXT, protocol TEXT, banner TEXT, notes TEXT, module TEXT)')
+        self.query('CREATE TABLE IF NOT EXISTS hosts (host TEXT, ip_address TEXT, region TEXT, country TEXT, latitude TEXT, longitude TEXT, notes TEXT, module TEXT)')
+        self.query('CREATE TABLE IF NOT EXISTS contacts (first_name TEXT, middle_name TEXT, last_name TEXT, email TEXT, title TEXT, region TEXT, country TEXT, phone TEXT, notes TEXT, module TEXT)')
+        self.query('CREATE TABLE IF NOT EXISTS credentials (username TEXT, password TEXT, hash TEXT, type TEXT, leak TEXT, notes TEXT, module TEXT)')
+        self.query('CREATE TABLE IF NOT EXISTS leaks (leak_id TEXT, description TEXT, source_refs TEXT, leak_type TEXT, title TEXT, import_date TEXT, leak_date TEXT, attackers TEXT, num_entries TEXT, score TEXT, num_domains_affected TEXT, attack_method TEXT, target_industries TEXT, password_hash TEXT, password_type TEXT, targets TEXT, media_refs TEXT, notes TEXT, module TEXT)')
+        self.query('CREATE TABLE IF NOT EXISTS pushpins (source TEXT, screen_name TEXT, profile_name TEXT, profile_url TEXT, media_url TEXT, thumb_url TEXT, message TEXT, latitude TEXT, longitude TEXT, time TEXT, notes TEXT, module TEXT)')
         self.query('CREATE TABLE IF NOT EXISTS profiles (username TEXT, resource TEXT, url TEXT, category TEXT, notes TEXT, module TEXT)')
-        self.query('CREATE TABLE IF NOT EXISTS repositories (name TEXT, owner TEXT, description TEXT, resource TEXT, category TEXT, url TEXT, module TEXT)')
+        self.query('CREATE TABLE IF NOT EXISTS repositories (name TEXT, owner TEXT, description TEXT, resource TEXT, category TEXT, url TEXT, notes TEXT, module TEXT)')
         self.query('CREATE TABLE IF NOT EXISTS dashboard (module TEXT PRIMARY KEY, runs INT)')
-        self.query('PRAGMA user_version = 8')
+        self.query('PRAGMA user_version = 10')
 
     def _migrate_db(self):
         db_version = lambda self: self.query('PRAGMA user_version')[0][0]
+        db_orig = db_version(self)
         if db_version(self) == 0:
             # add mname column to contacts table
             tmp = self.get_random_str(20)
@@ -300,7 +303,7 @@ class Recon(framework.Framework):
             self.query('CREATE TABLE IF NOT EXISTS profiles (username TEXT, resource TEXT, url TEXT, category TEXT, notes TEXT, module TEXT)')
             self.query('PRAGMA user_version = 6')
         if db_version(self) == 6:
-            # add profile table
+            # add repositories table
             self.query('CREATE TABLE IF NOT EXISTS repositories (name TEXT, owner TEXT, description TEXT, resource TEXT, category TEXT, url TEXT, module TEXT)')
             self.query('PRAGMA user_version = 7')
         if db_version(self) == 7:
@@ -308,6 +311,20 @@ class Recon(framework.Framework):
             self.query('ALTER TABLE leaks ADD COLUMN password_type TEXT')
             self.query('UPDATE leaks SET password_type=\'unknown\'')
             self.query('PRAGMA user_version = 8')
+        if db_version(self) == 8:
+            # add banner column to ports table
+            self.query('ALTER TABLE ports ADD COLUMN banner TEXT')
+            # add notes column to all tables
+            for table in ['domains', 'companies', 'netblocks', 'locations', 'vulnerabilities', 'ports', 'hosts', 'contacts', 'credentials', 'leaks', 'pushpins', 'profiles', 'repositories']:
+                if 'notes' not in [x[0] for x in self.get_columns(table)]:
+                    self.query(f"ALTER TABLE {table} ADD COLUMN notes TEXT")
+            self.query('PRAGMA user_version = 9')
+        if db_version(self) == 9:
+            # add phone column to contacts table
+            self.query('ALTER TABLE contacts ADD COLUMN phone TEXT')
+            self.query('PRAGMA user_version = 10')
+        if db_orig != db_version(self):
+            self.alert(f"Database upgraded to version {db_version(self)}.")
 
     #==================================================
     # MODULE METHODS
@@ -731,8 +748,8 @@ class Recon(framework.Framework):
             # send analytics information
             mod_loadpath = os.path.abspath(sys.modules[y.__module__].__file__)
             self._send_analytics(mod_dispname)
-            # return the loaded module if in command line mode
-            if self._mode == Mode.CLI:
+            # return the loaded module if not in console mode
+            if self._mode != Mode.CONSOLE:
                 return y
             # begin a command loop
             y.prompt = self._prompt_template.format(self.prompt[:-3], mod_dispname.split('/')[-1])
@@ -881,7 +898,8 @@ class Mode(object):
    '''Contains constants that represent the state of the interpreter.'''
    CONSOLE = 0
    CLI     = 1
-   GUI     = 2
+   WEB     = 2
+   JOB     = 3
    
    def __init__(self):
        raise NotImplementedError('This class should never be instantiated.')

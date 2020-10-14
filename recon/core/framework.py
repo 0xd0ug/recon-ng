@@ -19,7 +19,8 @@ import traceback
 #=================================================
 
 class FrameworkException(Exception):
-    pass
+    def __init__(self, message):
+        Exception.__init__(self, message)
 
 class Colors(object):
     N = '\033[m' # native
@@ -83,10 +84,15 @@ class Options(dict):
         self.description[name] = description
 
     def serialize(self):
-        data = {}
+        options = []
         for key in self:
-            data[key] = self[key]
-        return data
+            option = {}
+            option['name'] = key
+            option['value'] = self[key]
+            option['required'] = self.required[key]
+            option['description'] = self.description[key]
+            options.append(option)
+        return options
 
 #=================================================
 # FRAMEWORK CLASS
@@ -97,6 +103,7 @@ class Framework(cmd.Cmd):
     # mode flags
     _script = 0
     _load = 0
+    _mode = 0
     # framework variables
     _global_options = Options()
     _loaded_modules = {}
@@ -220,7 +227,7 @@ class Framework(cmd.Cmd):
         return False
 
     def get_random_str(self, length):
-        return ''.join(random.choice(string.lowercase) for i in range(length))
+        return ''.join(random.choice(string.ascii_lowercase) for i in range(length))
 
     def _is_writeable(self, filename):
         try:
@@ -251,8 +258,8 @@ class Framework(cmd.Cmd):
 
     def print_exception(self, line=''):
         stack_list = [x.strip() for x in traceback.format_exc().strip().splitlines()]
-        exctype = stack_list[-1].split(':')[0].strip()
-        message = ' '.join(stack_list[-1].split(':')[1:]).strip()
+        exctype = stack_list[-1].split(':', 1)[0].strip()
+        message = stack_list[-1].split(':', 1)[-1].strip()
         if self._global_options['verbosity'] == 0:
             return
         elif self._global_options['verbosity'] == 1:
@@ -389,56 +396,56 @@ class Framework(cmd.Cmd):
     # INSERT METHODS
     #==================================================
 
-    def _display(self, data, rowcount, pattern=None, keys=None):
+    def _display(self, data, rowcount):
         display = self.alert if rowcount else self.verbose
-        if pattern and keys:
-            values = tuple([data[key] or '<blank>' for key in keys])
-            display(pattern % values)
-        else:
-            for key in sorted(data.keys()):
-                display(f"{key.title()}: {data[key]}")
-            display(self.ruler*50)
+        for key in sorted(data.keys()):
+            display(f"{key.title()}: {data[key]}")
+        display(self.ruler*50)
 
-    def insert_domains(self, domain=None, mute=False):
+    def insert_domains(self, domain=None, notes=None, mute=False):
         '''Adds a domain to the database and returns the affected row count.'''
         data = dict(
-            domain = domain
+            domain = domain,
+            notes = notes
         )
         rowcount = self.insert('domains', data.copy(), data.keys())
-        if not mute: self._display(data, rowcount, '[domain] %s', data.keys())
+        if not mute: self._display(data, rowcount)
         return rowcount
 
-    def insert_companies(self, company=None, description=None, mute=False):
+    def insert_companies(self, company=None, description=None, notes=None, mute=False):
         '''Adds a company to the database and returns the affected row count.'''
         data = dict(
             company = company,
-            description = description
+            description = description,
+            notes = notes
         )
         rowcount = self.insert('companies', data.copy(), ('company',))
-        if not mute: self._display(data, rowcount, '[company] %s - %s', data.keys())
+        if not mute: self._display(data, rowcount)
         return rowcount
 
-    def insert_netblocks(self, netblock=None, mute=False):
+    def insert_netblocks(self, netblock=None, notes=None, mute=False):
         '''Adds a netblock to the database and returns the affected row count.'''
         data = dict(
-            netblock = netblock
+            netblock = netblock,
+            notes = notes
         )
         rowcount = self.insert('netblocks', data.copy(), data.keys())
-        if not mute: self._display(data, rowcount, '[netblock] %s', data.keys())
+        if not mute: self._display(data, rowcount)
         return rowcount
 
-    def insert_locations(self, latitude=None, longitude=None, street_address=None, mute=False):
+    def insert_locations(self, latitude=None, longitude=None, street_address=None, notes=None, mute=False):
         '''Adds a location to the database and returns the affected row count.'''
         data = dict(
             latitude = latitude,
             longitude = longitude,
-            street_address = street_address
+            street_address = street_address,
+            notes = notes
         )
         rowcount = self.insert('locations', data.copy(), data.keys())
-        if not mute: self._display(data, rowcount, '[location] %s, %s - %s', data.keys())
+        if not mute: self._display(data, rowcount)
         return rowcount
 
-    def insert_vulnerabilities(self, host=None, reference=None, example=None, publish_date=None, category=None, status=None, mute=False):
+    def insert_vulnerabilities(self, host=None, reference=None, example=None, publish_date=None, category=None, status=None, notes=None, mute=False):
         '''Adds a vulnerability to the database and returns the affected row count.'''
         data = dict(
             host = host,
@@ -446,25 +453,28 @@ class Framework(cmd.Cmd):
             example = example,
             publish_date = publish_date.strftime(self.time_format) if publish_date else None,
             category = category,
-            status = status
+            status = status,
+            notes = notes
         )
         rowcount = self.insert('vulnerabilities', data.copy(), data.keys())
         if not mute: self._display(data, rowcount)
         return rowcount
 
-    def insert_ports(self, ip_address=None, host=None, port=None, protocol=None, mute=False):
+    def insert_ports(self, ip_address=None, host=None, port=None, protocol=None, banner=None, notes=None, mute=False):
         '''Adds a port to the database and returns the affected row count.'''
         data = dict(
             ip_address = ip_address,
             port = port,
             host = host,
-            protocol = protocol
+            protocol = protocol,
+            banner = banner,
+            notes = notes
         )
         rowcount = self.insert('ports', data.copy(), ('ip_address', 'port', 'host'))
-        if not mute: self._display(data, rowcount, '[port] %s (%s/%s) - %s', ('ip_address', 'port', 'protocol', 'host'))
+        if not mute: self._display(data, rowcount)
         return rowcount
 
-    def insert_hosts(self, host=None, ip_address=None, region=None, country=None, latitude=None, longitude=None, mute=False):
+    def insert_hosts(self, host=None, ip_address=None, region=None, country=None, latitude=None, longitude=None, notes=None, mute=False):
         '''Adds a host to the database and returns the affected row count.'''
         data = dict(
             host = host,
@@ -472,13 +482,14 @@ class Framework(cmd.Cmd):
             region = region,
             country = country,
             latitude = latitude,
-            longitude = longitude
+            longitude = longitude,
+            notes = notes
         )
         rowcount = self.insert('hosts', data.copy(), ('host', 'ip_address'))
-        if not mute: self._display(data, rowcount, '[host] %s (%s)', ('host', 'ip_address'))
+        if not mute: self._display(data, rowcount)
         return rowcount
 
-    def insert_contacts(self, first_name=None, middle_name=None, last_name=None, email=None, title=None, region=None, country=None, mute=False):
+    def insert_contacts(self, first_name=None, middle_name=None, last_name=None, email=None, title=None, region=None, country=None, phone=None, notes=None, mute=False):
         '''Adds a contact to the database and returns the affected row count.'''
         data = dict(
             first_name = first_name,
@@ -487,13 +498,15 @@ class Framework(cmd.Cmd):
             title = title,
             email = email,
             region = region,
-            country = country
+            country = country,
+            phone = phone,
+            notes = notes
         )
-        rowcount = self.insert('contacts', data.copy(), ('first_name', 'middle_name', 'last_name', 'title', 'email'))
-        if not mute: self._display(data, rowcount, '[contact] %s %s (%s) - %s', ('first_name', 'last_name', 'email', 'title'))
+        rowcount = self.insert('contacts', data.copy(), ('first_name', 'middle_name', 'last_name', 'title', 'email', 'phone'))
+        if not mute: self._display(data, rowcount)
         return rowcount
 
-    def insert_credentials(self, username=None, password=None, _hash=None, _type=None, leak=None, mute=False):
+    def insert_credentials(self, username=None, password=None, _hash=None, _type=None, leak=None, notes=None, mute=False):
         '''Adds a credential to the database and returns the affected row count.'''
 
         # account for hashes provided in the password field
@@ -514,13 +527,14 @@ class Framework(cmd.Cmd):
             password = password,
             hash = _hash,
             type = _type,
-            leak = leak
+            leak = leak,
+            notes = notes
         )
         rowcount = self.insert('credentials', data.copy(), data.keys())
-        if not mute: self._display(data, rowcount, '[credential] %s: %s', ('username', 'password'))
+        if not mute: self._display(data, rowcount)
         return rowcount
 
-    def insert_leaks(self, leak_id=None, description=None, source_refs=None, leak_type=None, title=None, import_date=None, leak_date=None, attackers=None, num_entries=None, score=None, num_domains_affected=None, attack_method=None, target_industries=None, password_hash=None, password_type=None, targets=None, media_refs=None, mute=False):
+    def insert_leaks(self, leak_id=None, description=None, source_refs=None, leak_type=None, title=None, import_date=None, leak_date=None, attackers=None, num_entries=None, score=None, num_domains_affected=None, attack_method=None, target_industries=None, password_hash=None, password_type=None, targets=None, media_refs=None, notes=None, mute=False):
         '''Adds a leak to the database and returns the affected row count.'''
         data = dict(
             leak_id = leak_id,
@@ -539,13 +553,14 @@ class Framework(cmd.Cmd):
             password_hash = password_hash,
             password_type = password_type,
             targets = targets,
-            media_refs = media_refs
+            media_refs = media_refs,
+            notes = notes
         )
         rowcount = self.insert('leaks', data.copy(), data.keys())
         if not mute: self._display(data, rowcount)
         return rowcount
 
-    def insert_pushpins(self, source=None, screen_name=None, profile_name=None, profile_url=None, media_url=None, thumb_url=None, message=None, latitude=None, longitude=None, time=None, mute=False):
+    def insert_pushpins(self, source=None, screen_name=None, profile_name=None, profile_url=None, media_url=None, thumb_url=None, message=None, latitude=None, longitude=None, time=None, notes=None, mute=False):
         '''Adds a pushpin to the database and returns the affected row count.'''
         data = dict(
             source = source,
@@ -557,7 +572,8 @@ class Framework(cmd.Cmd):
             message = message,
             latitude = latitude,
             longitude = longitude,
-            time = time.strftime(self.time_format)
+            time = time.strftime(self.time_format),
+            notes = notes
         )
         rowcount = self.insert('pushpins', data.copy(), data.keys())
         if not mute: self._display(data, rowcount)
@@ -573,10 +589,10 @@ class Framework(cmd.Cmd):
             notes = notes
         )
         rowcount = self.insert('profiles', data.copy(), ('username', 'url'))
-        if not mute: self._display(data, rowcount, '[profile] %s - %s (%s)', ('username', 'resource', 'url'))
+        if not mute: self._display(data, rowcount)
         return rowcount
 
-    def insert_repositories(self, name=None, owner=None, description=None, resource=None, category=None, url=None, mute=False):
+    def insert_repositories(self, name=None, owner=None, description=None, resource=None, category=None, url=None, notes=None, mute=False):
         '''Adds a repository to the database and returns the affected row count.'''
         data = dict(
             name = name,
@@ -584,10 +600,11 @@ class Framework(cmd.Cmd):
             description = description,
             resource = resource,
             category = category,
-            url = url
+            url = url,
+            notes = notes
         )
         rowcount = self.insert('repositories', data.copy(), data.keys())
-        if not mute: self._display(data, rowcount, '[repository] %s - %s', ('name', 'description'))
+        if not mute: self._display(data, rowcount)
         return rowcount
 
     def insert(self, table, data, unique_columns=[]):
@@ -625,9 +642,9 @@ class Framework(cmd.Cmd):
 
         # increment summary tracker
         if table not in self._summary_counts:
-            self._summary_counts[table] = [0,0]
-        self._summary_counts[table][0] += rowcount
-        self._summary_counts[table][1] += 1
+            self._summary_counts[table] = {'count': 0, 'new': 0}
+        self._summary_counts[table]['new'] += rowcount
+        self._summary_counts[table]['count'] += 1
 
         return rowcount
 
@@ -692,7 +709,7 @@ class Framework(cmd.Cmd):
                             # invalid key, contnue to load valid keys
                             continue
 
-    def _save_config(self, name):
+    def _save_config(self, name, module=None, options=None):
         config_path = os.path.join(self.workspace, 'config.dat')
         # create a config file if one doesn't exist
         open(config_path, 'a').close()
@@ -703,17 +720,20 @@ class Framework(cmd.Cmd):
             except ValueError:
                 # file is empty or corrupt, nothing to load
                 config_data = {}
+        # override implicit defaults if specified
+        module = module or self._modulename
+        options = options or self.options
         # create a container for the current module
-        if self._modulename not in config_data:
-            config_data[self._modulename] = {}
+        if module not in config_data:
+            config_data[module] = {}
         # set the new option value in the config
-        config_data[self._modulename][name] = self.options[name]
+        config_data[module][name] = options[name]
         # remove the option if it has been unset
-        if config_data[self._modulename][name] is None:
-            del config_data[self._modulename][name]
+        if config_data[module][name] is None:
+            del config_data[module][name]
         # remove the module container if it is empty
-        if not config_data[self._modulename]:
-            del config_data[self._modulename]
+        if not config_data[module]:
+            del config_data[module]
         # write the new config data to the config file
         with open(config_path, 'w') as config_file:
             json.dump(config_data, config_file, indent=4)
@@ -894,13 +914,14 @@ class Framework(cmd.Cmd):
     def _do_options_set(self, params):
         '''Sets a current context option'''
         option, value = self._parse_params(params)
-        if not option and value:
+        if not (option and value):
             self._help_options_set()
             return
-        if option in self.options:
-            self.options[option] = value
-            print(f"{option} => {value}")
-            self._save_config(option)
+        name = option.upper()
+        if name in self.options:
+            self.options[name] = value
+            print(f"{name} => {value}")
+            self._save_config(name)
         else:
             self.error('Invalid option name.')
 
@@ -910,8 +931,9 @@ class Framework(cmd.Cmd):
         if not option:
             self._help_options_unset()
             return
-        if option in self.options:
-            self._do_options_set(' '.join([option, 'None']))
+        name = option.upper()
+        if name in self.options:
+            self._do_options_set(' '.join([name, 'None']))
         else:
             self.error('Invalid option name.')
 
@@ -1001,6 +1023,39 @@ class Framework(cmd.Cmd):
             return getattr(self, '_do_db_'+arg)(params)
         else:
             self.help_db()
+
+    def _do_db_notes(self, params):
+        '''Adds notes to rows in the database'''
+        table, params = self._parse_params(params)
+        if not table:
+            self._help_db_notes()
+            return
+        if table in self.get_tables():
+            # get rowid and note from parameters
+            if params:
+                arg, note = self._parse_params(params)
+                rowids = self._parse_rowids(arg)
+            # get rowid and note from interactive input
+            else:
+                try:
+                    # prompt user for data
+                    params = input('rowid(s) (INT): ')
+                    rowids = self._parse_rowids(params)
+                    note = input('note (TXT): ')
+                except KeyboardInterrupt:
+                    print('')
+                    return
+                finally:
+                    # ensure proper output for resource scripts
+                    if Framework._script:
+                        print(f"{params}")
+            # delete record(s) from the database
+            count = 0
+            for rowid in rowids:
+                count += self.query(f"UPDATE `{table}` SET notes=? WHERE ROWID IS ?", (note, rowid))
+            self.output(f"{count} rows affected.")
+        else:
+            self.output('Invalid table name.')
 
     def _do_db_insert(self, params):
         '''Inserts a row into the database'''
@@ -1245,11 +1300,11 @@ class Framework(cmd.Cmd):
 
     def _help_options_set(self):
         print(getattr(self, '_do_options_set').__doc__)
-        print(f"{os.linesep}Usage: set <option> <value>{os.linesep}")
+        print(f"{os.linesep}Usage: options set <option> <value>{os.linesep}")
 
     def _help_options_unset(self):
         print(getattr(self, '_do_options_unset').__doc__)
-        print(f"{os.linesep}Usage: unset <option>{os.linesep}")
+        print(f"{os.linesep}Usage: options unset <option>{os.linesep}")
 
     def help_keys(self):
         print(getattr(self, 'do_keys').__doc__)
@@ -1283,6 +1338,11 @@ class Framework(cmd.Cmd):
     def help_db(self):
         print(getattr(self, 'do_db').__doc__)
         print(f"{os.linesep}Usage: db <{'|'.join(self._parse_subcommands('db'))}> [...]{os.linesep}")
+
+    def _help_db_notes(self):
+        print(getattr(self, '_do_db_notes').__doc__)
+        print(f"{os.linesep}Usage: db note <table> [<rowid(s)> <note>]{os.linesep}")
+        print(f"rowid(s) => ',' delimited values or '-' delimited ranges representing rowids{os.linesep}")
 
     def _help_db_insert(self):
         print(getattr(self, '_do_db_insert').__doc__)
@@ -1380,7 +1440,7 @@ class Framework(cmd.Cmd):
 
     def _complete_db_insert(self, text, *ignored):
         return [x for x in sorted(self.get_tables()) if x.startswith(text)]
-    _complete_db_delete = _complete_db_insert
+    _complete_db_notes = _complete_db_delete = _complete_db_insert
 
     def _complete_db_query(self, text, *ignored):
         return []
