@@ -6,28 +6,15 @@ $("#workspace").change(function(){
     $("#columns").hide();
     $("#exports").hide();
     $("#data").hide();
+    // get the data from the api
     var workspace = $("#workspace option:selected").text();
-    // set the workspace
-    $.ajax({
-        type: "PATCH",
-        url: "/api/workspaces/"+workspace,
-        data: JSON.stringify({"status": "active"}),
-        processData: false,
-        contentType: 'application/json',
-    })
-    .done(function(data, status){
-        console.log("Workspace activated: "+workspace);
-    });
-    // create the summary
-    $.get("/api/dashboard", function(data, status){
-        createSummary(data);
-    });
-    // create the workspace
-    $.get("/api/tables/", function(data, status){
+    var url = "/api/workspaces/"+workspace;
+    $.get(url, function(data, status){
+        // create the workspace
         createWorkspace(data.tables);
-    });
-    // create the reports options
-    $.get("/api/reports/", function(data, status){
+        // create the summary
+        createSummary(data.summary);
+        // create the reports options
         createReports(data.reports);
     });
     // show the new elements on screen
@@ -35,16 +22,20 @@ $("#workspace").change(function(){
     $("#tables").show();
     $("#summary").show();
     // set the width of the workspace select box
-    //setSelectWidth($(this));
+    setSelectWidth($(this));
     // set the height of the summary panels
     setFillHeight();
 });
 
 $("#reports-list").on("click", "li", function(e) {
+    // get the current workspace
+    var workspace = $("#workspace option:selected").text();
     // get the report name
     var report = $(e.target).text();
+    // build the url
+    var url = "/api/workspaces/"+workspace+"."+report;
     // open in a new tab
-    window.open("/api/reports/"+report, '_blank');
+    window.open(url, '_blank');
     // prevent the checked state
     e.preventDefault();
     e.stopPropagation();
@@ -57,16 +48,16 @@ $("#tables-list").on("click", "li", function() {
     });
     $(this).addClass("active");
     // get the data from the api
+    var workspace = $("#workspace option:selected").text();
     var table = $(this).text();
-    $.get("/api/tables/"+table, function(data, status) {
+    var url = "/api/workspaces/"+workspace+"/tables/"+table;
+    $.get(url, function(data, status) {
         // create the column filter
         createColumnFilter(data.columns);
-        // create the data table
-        createDataTable(data.rows);
-    });
-    $.get("/api/exports", function(data, status) {
         // create the export menu
         createExportMenu(data.exports);
+        // create the data table
+        createDataTable(data.rows);
     });
     // show the new elements on screen
     $("#summary").hide();
@@ -82,6 +73,8 @@ $("#columns-list").on("click", "#filter", function (e) {
         checked.push($(this).val());
     });
     var checkedStr = checked.join();
+    // get the current workspace
+    var workspace = $("#workspace option:selected").text();
     // get the current table
     var table = "";
     $("#tables-list > li").each(function (i, e) {
@@ -89,8 +82,10 @@ $("#columns-list").on("click", "#filter", function (e) {
             table = $(e).find('a').text();
         }
     });
+    // build the url
+    var url = "/api/workspaces/"+workspace+"/tables/"+table+"?columns="+checkedStr;
     // get the data from the api
-    $.get("/api/tables/"+table+"?columns="+checkedStr, function(data, status) {
+    $.get(url, function(data, status) {
         // create the data table
         createDataTable(data.rows);
     });
@@ -108,6 +103,8 @@ $("#exports-list").on("click", "li", function(e) {
         checked.push($(this).val());
     });
     var checkedStr = checked.join();
+    // get the current workspace
+    var workspace = $("#workspace option:selected").text();
     // get the current table
     var table = "";
     $("#tables-list > li").each(function (i, e) {
@@ -117,8 +114,10 @@ $("#exports-list").on("click", "li", function(e) {
     });
     // get the desired format
     var format = $(this).text();
+    // build the url
+    var url = "/api/workspaces/"+workspace+"/tables/"+table+"."+format+"?columns="+checkedStr;
     // open in a new tab to download the file
-    window.open("/api/tables/"+table+"?format="+format+"&columns="+checkedStr, '_blank');
+    window.open(url, '_blank');
     // prevent the checked state
     e.preventDefault();
     e.stopPropagation();
@@ -130,7 +129,7 @@ function createWorkspace(tables) {
     // add DOM elements based on the provided table names
     $.each(tables, function(i) {
         var li = $("<li/>").appendTo($("#tables-list"));
-        var a = $("<a/>").attr("href", "javascript:void(0)").text(tables[i]).appendTo(li);
+        var a = $("<a/>").attr("href", "javascript:void(0)").text(tables[i].name).appendTo(li);
     });
 }
 
@@ -144,11 +143,11 @@ function createSummary(summary) {
         var div2 = $("<div/>").addClass("count").appendTo($("#summary-list-l")).text(summary.records[i].count);
     });
     // add DOM elements to right panel based on the provided modules
-    if (summary.activity.length > 0) {
-        $.each(summary.activity, function(i) {
+    if (summary.modules.length > 0) {
+        $.each(summary.modules, function(i) {
             var div0 = $("<div/>").appendTo($("#summary-list-r"))
-            var div1 = $("<div/>").addClass("module").appendTo(div0).text(summary.activity[i].module);
-            var div2 = $("<div/>").addClass("runs").appendTo(div0).text(summary.activity[i].runs);
+            var div1 = $("<div/>").addClass("module").appendTo(div0).text(summary.modules[i].module);
+            var div2 = $("<div/>").addClass("runs").appendTo(div0).text(summary.modules[i].runs);
         });
     } else {
         $("#summary-list-r").append("<h5>No Data.</h5>");
