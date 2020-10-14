@@ -11,6 +11,7 @@ import textwrap
 import yaml
 # framework libs
 from recon.core import framework
+from recon.utils import validators
 
 #=================================================
 # MODULE CLASS
@@ -130,6 +131,26 @@ class BaseModule(framework.Framework):
                 del elements[0]
         return domains
 
+    def _validate_input(self):
+        validator_type = self.meta.get('validator')
+        if not validator_type:
+            # passthru, no validator required
+            self.debug('No validator required.')
+            return
+        validator = None
+        validator_name = validator_type.capitalize() + 'Validator'
+        for obj in [self, validators]:
+            if hasattr(obj, validator_name):
+                validator = getattr(validators, validator_name)()
+        if not validator:
+            # passthru, no validator defined
+            self.debug('No validator defined.')
+            return
+        inputs = self._get_source(self.options['source'], self._default_source)
+        for _input in inputs:
+            validator.validate(_input)
+            self.debug('All inputs validated.')
+
     #==================================================
     # OPTIONS METHODS
     #==================================================
@@ -199,6 +220,32 @@ class BaseModule(framework.Framework):
     def _do_goptions_list(self, params):
         '''Shows the global context options'''
         self._list_options(self._global_options)
+
+    def _do_goptions_set(self, params):
+        '''Sets a global context option'''
+        option, value = self._parse_params(params)
+        if not (option and value):
+            self._help_goptions_set()
+            return
+        name = option.upper()
+        if name in self._global_options:
+            self._global_options[name] = value
+            print(f"{name} => {value}")
+            self._save_config(name, 'base', self._global_options)
+        else:
+            self.error('Invalid option name.')
+
+    def _do_goptions_unset(self, params):
+        '''Unsets a global context option'''
+        option, value = self._parse_params(params)
+        if not option:
+            self._help_goptions_unset()
+            return
+        name = option.upper()
+        if name in self._global_options:
+            self._do_goptions_set(' '.join([name, 'None']))
+        else:
+            self.error('Invalid option name.')
 
     def _do_modules_load(self, params):
         '''Loads a module'''
@@ -277,24 +324,34 @@ class BaseModule(framework.Framework):
         else:
             self.output('Source option not available for this module.')
 
+    def run(self):
+        self._validate_options()
+        self._validate_input()
+        self._summary_counts = {}
+        pre = self.module_pre()
+        params = [pre] if pre is not None else []
+        # provide input if a default query is specified in the module
+        if hasattr(self, '_default_source'):
+            objs = self._get_source(self.options['source'], self._default_source)
+            params.insert(0, objs)
+        # update the dashboard before running the module
+        # data is added at runtime, so even if an error occurs, any new items
+        # must be accounted for by a module execution attempt
+        self.query(f"INSERT OR REPLACE INTO dashboard (module, runs) VALUES ('{self._modulename}', COALESCE((SELECT runs FROM dashboard WHERE module='{self._modulename}')+1, 1))")
+        self.module_run(*params)
+        self.module_post()
+
     def do_run(self, params):
         '''Runs the loaded module'''
         try:
-            self._summary_counts = {}
-            self._validate_options()
-            pre = self.module_pre()
-            params = [pre] if pre is not None else []
-            # provide input if a default query is specified in the module
-            if hasattr(self, '_default_source'):
-                objs = self._get_source(self.options['source'], self._default_source)
-                params.insert(0, objs)
-            self.module_run(*params)
-            self.module_post()
+            self.run()
         except KeyboardInterrupt:
             print('')
         except (Timeout, socket.timeout):
             self.print_exception()
             self.error('A request took too long to complete. If the issue persists, increase the global TIMEOUT option.')
+        except (framework.FrameworkException, validators.ValidationException):
+            self.print_exception()
         except Exception:
             self.print_exception()
             self.error('Something broken? See https://github.com/lanmaster53/recon-ng/wiki/Troubleshooting#issue-reporting.')
@@ -303,24 +360,29 @@ class BaseModule(framework.Framework):
             if self._summary_counts:
                 self.heading('Summary', level=0)
                 for table in self._summary_counts:
-                    new = self._summary_counts[table][0]
-                    cnt = self._summary_counts[table][1]
+                    new = self._summary_counts[table]['new']
+                    cnt = self._summary_counts[table]['count']
                     if new > 0:
                         method = getattr(self, 'alert')
                     else:
                         method = getattr(self, 'output')
                     method(f"{cnt} total ({new} new) {table} found.")
-                self._summary_counts = {}
-            # update the dashboard
-            self.query(f"INSERT OR REPLACE INTO dashboard (module, runs) VALUES ('{self._modulename}', COALESCE((SELECT runs FROM dashboard WHERE module='{self._modulename}')+1, 1))")
 
     #==================================================
     # HELP METHODS
     #==================================================
 
     def help_goptions(self):
-        print(getattr(self, 'do_options').__doc__)
-        print(f"{os.linesep}Usage: goptions <list>{os.linesep}")
+        print(getattr(self, 'do_goptions').__doc__)
+        print(f"{os.linesep}Usage: goptions <{'|'.join(self._parse_subcommands('goptions'))}> [...]{os.linesep}")
+
+    def _help_goptions_set(self):
+        print(getattr(self, '_do_goptions_set').__doc__)
+        print(f"{os.linesep}Usage: goptions set <option> <value>{os.linesep}")
+
+    def _help_goptions_unset(self):
+        print(getattr(self, '_do_goptions_unset').__doc__)
+        print(f"{os.linesep}Usage: goptions unset <option>{os.linesep}")
 
     #==================================================
     # COMPLETE METHODS
@@ -335,6 +397,10 @@ class BaseModule(framework.Framework):
 
     def _complete_goptions_list(self, text, *ignored):
         return []
+
+    def _complete_goptions_set(self, text, *ignored):
+        return [x for x in self._global_options if x.startswith(text.upper())]
+    _complete_goptions_unset = _complete_goptions_set
 
     def complete_reload(self, text, *ignored):
         return []
